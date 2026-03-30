@@ -19,7 +19,7 @@ Built with **Neo4j** (graph storage) + **Qwen3.5-9b** (fully local LLM) + **Fast
 - **Send** — sends a message
 
 The UI also displays the current number of episodic nodes, semantic nodes and edges. At the beginning of each request, 
-the triggered nodes are highlighted.
+the triggered nodes are highlighted. As the conversation goes on, topics are automatically clustered and connected.
 
 
 ![MemGraph UI.](/MemGraphUI.png)
