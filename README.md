@@ -95,11 +95,11 @@ docker run \
 ## Installation
 
 ```bash
-git clone https://github.com/NamrataChakka/MemGraph.git
-cd memgraph
+git clone https://github.com/NamrataChakka/MemGraph-Agent.git
+cd MemGraph-Agent
 
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
 pip install -r requirements.txt
 

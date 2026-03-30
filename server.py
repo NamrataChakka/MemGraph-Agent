@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import uvicorn
 
 load_dotenv()
 
@@ -48,7 +49,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="MemGraph Agent", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # request/response models
@@ -150,5 +150,4 @@ async def get_profile():
 
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

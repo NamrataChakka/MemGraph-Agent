@@ -4,8 +4,6 @@ Conversational agent backed by the graph memory engine.
 
 from __future__ import annotations
 
-from typing import Iterator
-
 from .memory import MemGraphEngine, LLMClient
 
 SYSTEM_TEMPLATE = """\
