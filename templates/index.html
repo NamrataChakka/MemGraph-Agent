@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MemGraph Agent</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3e;
+    --accent:   #7c6af7;
+    --accent2:  #4ecdc4;
+    --text:     #e2e4f0;
+    --muted:    #6b7280;
+    --episodic: #7c6af7;
+    --semantic: #4ecdc4;
+    --edge:     #374151;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .5px; }
+  header span { font-size: .78rem; color: var(--muted); }
+  .badge {
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: .7rem;
+    font-weight: 600;
+    margin-left: auto;
+  }
+  #status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+  }
+
+  /* ── main layout ── */
+  main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── left: chat ── */
+  #chat-panel {
+    width: 420px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .msg {
+    max-width: 88%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: .88rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.agent {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.system {
+    align-self: center;
+    background: transparent;
+    color: var(--muted);
+    font-size: .75rem;
+    border: none;
+    padding: 2px 0;
+  }
+
+  .node-highlighted circle {
+  stroke: var(--accent2) !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 6px var(--accent2));
+    }
+    .node-highlighted text {
+      fill: var(--accent2) !important;
+    }
+    .edge-traversed {
+      stroke: var(--accent2) !important;
+      stroke-width: 2.5px !important;
+      stroke-dasharray: 6 3;
+      animation: dash-flow .6s linear infinite;
+    }
+    @keyframes dash-flow {
+      to { stroke-dashoffset: -9; }
+    }
+
+  .typing {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    border-bottom-left-radius: 4px;
+    padding: 12px 16px;
+  }
+  .typing span {
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--muted);
+    border-radius: 50%;
+    animation: bounce .8s infinite;
+    margin: 0 2px;
+  }
+  .typing span:nth-child(2) { animation-delay: .15s; }
+  .typing span:nth-child(3) { animation-delay: .30s; }
+  @keyframes bounce {
+    0%,80%,100% { transform: translateY(0); }
+    40%         { transform: translateY(-6px); }
+  }
+
+  #input-area {
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  #user-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: .88rem;
+    padding: 10px 14px;
+    resize: none;
+    min-height: 42px;
+    max-height: 120px;
+    outline: none;
+    font-family: inherit;
+    line-height: 1.4;
+  }
+  #user-input:focus { border-color: var(--accent); }
+  #send-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    cursor: pointer;
+    font-size: .88rem;
+    font-weight: 600;
+    transition: opacity .15s;
+    height: 42px;
+    flex-shrink: 0;
+  }
+  #send-btn:hover { opacity: .85; }
+  #send-btn:disabled { opacity: .4; cursor: default; }
+
+  #toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .tool-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: .75rem;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .tool-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  /* ── right: graph ── */
+  #graph-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #graph-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: .82rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  #graph-header strong { color: var(--text); }
+  #graph-stats { margin-left: auto; display: flex; gap: 16px; }
+  .stat { display: flex; align-items: center; gap: 5px; font-size: .75rem; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.e { background: var(--episodic); }
+  .dot.s { background: var(--semantic); }
+
+  #graph-svg { flex: 1; }
+
+  /* ── search panel ── */
+  #search-panel {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  #search-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+
+  #search-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: .82rem;
+    padding: 7px 12px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color .15s;
+  }
+  #search-input:focus { border-color: var(--accent2); }
+  #search-input::placeholder { color: var(--muted); }
+
+  #search-btn {
+    background: var(--accent2);
+    color: #0f1117;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity .15s;
+  }
+  #search-btn:hover { opacity: .85; }
+
+  #search-clear {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: .78rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: none;
+    transition: color .15s;
+  }
+  #search-clear:hover { color: var(--text); }
+
+  #search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+  }
+  #search-results:empty { padding: 0; }
+
+  .search-result {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: .8rem;
+    cursor: default;
+    transition: border-color .15s;
+  }
+  .search-result:hover { border-color: var(--accent); }
+  .search-result.Episodic { border-left-color: var(--episodic); }
+  .search-result.Semantic  { border-left-color: var(--semantic); }
+
+  .result-meta {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 5px;
+  }
+  .result-type {
+    font-size: .68rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    letter-spacing: .4px;
+  }
+  .result-type.Episodic { background: #7c6af720; color: var(--episodic); }
+  .result-type.Semantic  { background: #4ecdc420; color: var(--semantic); }
+
+  .result-date { font-size: .7rem; color: var(--muted); }
+  .result-conf { font-size: .7rem; color: var(--muted); margin-left: auto; }
+
+  .result-content {
+    color: var(--text);
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .result-neighbors {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .neighbors-label {
+    font-size: .68rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .neighbor-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: .75rem;
+    color: var(--muted);
+  }
+  .rel-badge {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: .62rem;
+    color: var(--muted);
+    flex-shrink: 0;
+    letter-spacing: .3px;
+  }
+  .search-empty {
+    padding: 10px 4px;
+    font-size: .8rem;
+    color: var(--muted);
+  }
+
+  /* ── node detail panel ── */
+  #detail-panel {
+    position: absolute;
+    right: 20px;
+    top: 80px;
+    width: 280px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    font-size: .82rem;
+    display: none;
+    z-index: 10;
+  }
+  #detail-panel h3 { font-size: .85rem; margin-bottom: 8px; color: var(--accent2); }
+  #detail-close {
+    position: absolute; top: 10px; right: 12px;
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 1rem;
+  }
+  #detail-content { color: var(--muted); line-height: 1.5; }
+  #detail-tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: .7rem;
+    color: var(--muted);
+  }
+    #profile-panel {
+  position: absolute;
+  left: 420px;
+  top: 57px;
+  width: 320px;
+  max-height: calc(100vh - 77px);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+  overflow: hidden;
+    }
+
+    #profile-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: .85rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    #profile-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .9rem;
+    }
+
+    #profile-body {
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .profile-category {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .profile-category-label {
+      font-size: .68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .profile-fact {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: .8rem;
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    .conf-bar-wrap {
+      flex-shrink: 0;
+      width: 40px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .conf-bar {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--accent2);
+      transition: width .3s;
+    }
+
+    .profile-empty {
+      font-size: .8rem;
+      color: var(--muted);
+      padding: 8px 0;
+    }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="status-dot"></div>
+  <h1>MemGraph Agent</h1>
+  <span>Graph memory · Episodic / Semantic</span>
+  <div class="badge">LOCAL</div>
+</header>
+
+<main>
+  <!-- chat -->
+  <div id="chat-panel">
+    <div id="messages">
+      <div class="msg system">Memory graph loaded. Start chatting.</div>
+    </div>
+    <!-- search -->
+    <div id="search-panel">
+      <div id="search-input-row">
+        <input id="search-input" type="text" placeholder="Search memory…" autocomplete="off"/>
+        <button id="search-btn">Search</button>
+        <button id="search-clear">✕</button>
+      </div>
+      <div id="search-results"></div>
+    </div>
+
+    <div id="toolbar">
+      <button class="tool-btn" onclick="resetSession()">↺ New session</button>
+      <button class="tool-btn" onclick="refreshGraph()">⟳ Refresh graph</button>
+      <button class="tool-btn" onclick="clearGraph()">🗑 Clear graph</button>
+      <button class="tool-btn" onclick="toggleProfile()">👤 Profile</button>
+    </div>
+    <div id="input-area">
+      <textarea id="user-input" placeholder="Type a message…" rows="1"></textarea>
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- graph -->
+  <div id="graph-panel">
+    <div id="graph-header">
+      <strong>Memory Graph</strong>
+      <div id="graph-stats">
+        <div class="stat"><div class="dot e"></div><span id="cnt-e">0 episodic</span></div>
+        <div class="stat"><div class="dot s"></div><span id="cnt-s">0 semantic</span></div>
+        <span id="cnt-edges">0 edges</span>
+      </div>
+    </div>
+    <svg id="graph-svg"></svg>
+  </div>
+
+    <!-- profile panel -->
+    <div id="profile-panel" style="display:none">
+      <div id="profile-header">
+        <span>User Profile</span>
+        <button id="profile-close" onclick="toggleProfile()">✕</button>
+      </div>
+      <div id="profile-body"></div>
+    </div>
+</main>
+
+<!-- node detail -->
+<div id="detail-panel">
+  <h3 id="detail-type">Episodic</h3>
+  <button id="detail-close" onclick="closeDetail()">✕</button>
+  <div id="detail-content"></div>
+  <div id="detail-tags"></div>
+</div>
+
+<script>
+// ── state
+
+let simulation = null;
+let graphData  = { nodes: [], edges: [] };
+
+// ── chat ───────────────────────────────────────────────────────────────────
+
+const messagesEl  = document.getElementById('messages');
+const inputEl     = document.getElementById('user-input');
+const sendBtn     = document.getElementById('send-btn');
+
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+});
+
+function addMsg(text, role) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function showTyping() {
+  const div = document.createElement('div');
+  div.className = 'typing';
+  div.id = 'typing-indicator';
+  div.innerHTML = '<span></span><span></span><span></span>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function hideTyping() {
+  const el = document.getElementById('typing-indicator');
+  if (el) el.remove();
+}
+
+function highlightByQuery(query) {
+  if (!query) return;
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+
+  svg.select('.nodes-layer').selectAll('g')
+    .classed('node-highlighted', d =>
+      terms.some(t => (d.content || '').toLowerCase().includes(t))
+    );
+
+  svg.select('.edges-layer').selectAll('line')
+    .classed('edge-traversed', d => {
+      const src = typeof d.source === 'object' ? d.source : graphData.nodes.find(n => n.id === d.source);
+      return src && terms.some(t => (src.content || '').toLowerCase().includes(t));
+    });
+
+  setTimeout(() => {
+    svg.select('.nodes-layer').selectAll('g').classed('node-highlighted', false);
+    svg.select('.edges-layer').selectAll('line').classed('edge-traversed', false);
+  }, 4000);
+}
+
+async function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+
+  addMsg(text, 'user');
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  sendBtn.disabled = true;
+  showTyping();
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    });
+    const data = await res.json();
+    hideTyping();
+    addMsg(data.reply, 'agent');
+    setTimeout(() => {
+      refreshGraph().then(() => highlightByQuery(text));
+    }, 600);
+  } catch (err) {
+    hideTyping();
+    addMsg('⚠ Error reaching server: ' + err.message, 'system');
+  } finally {
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+}
+
+async function resetSession() {
+  await fetch('/reset', { method: 'POST' });
+  addMsg('Session history cleared. Graph memory persists.', 'system');
+}
+
+async function clearGraph() {
+  if (!confirm("Delete all memories from the graph? This cannot be undone.")) return;
+  await fetch('/clear', { method: 'POST' });
+  graphData = { nodes: [], edges: [] };
+  renderGraph(graphData);
+  updateStats(graphData);
+  searchResults.innerHTML = '';
+  addMsg('Graph cleared. All memories deleted.', 'system');
+}
+
+// ── graph
+
+const svg      = d3.select('#graph-svg');
+const COLOR    = { Episodic: '#7c6af7', Semantic: '#4ecdc4' };
+const RADIUS   = { Episodic: 8, Semantic: 13 };
+
+let width  = 0;
+let height = 0;
+
+function initGraph() {
+  const bbox = document.getElementById('graph-svg').getBoundingClientRect();
+  width  = bbox.width;
+  height = bbox.height;
+
+  svg.selectAll('*').remove();
+
+  svg.append('defs').append('marker')
+    .attr('id', 'arrow')
+    .attr('viewBox', '0 -4 8 8')
+    .attr('refX', 20)
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-4L8,0L0,4')
+    .attr('fill', '#374151');
+
+  svg.append('g').attr('class', 'edges-layer');
+  svg.append('g').attr('class', 'nodes-layer');
+
+  svg.call(d3.zoom().scaleExtent([.3, 4]).on('zoom', e => {
+    svg.select('.edges-layer').attr('transform', e.transform);
+    svg.select('.nodes-layer').attr('transform', e.transform);
+  }));
+}
+
+async function refreshGraph() {
+  try {
+    const res  = await fetch('/graph');
+    const data = await res.json();
+    graphData  = data;
+    updateStats(data);
+    renderGraph(data);
+  } catch (e) {
+    console.warn('Graph refresh failed:', e);
+  }
+}
+
+const CATEGORY_ICONS = {
+  location:     '📍',
+  preference:   '♡',
+  habit:        '🔁',
+  job:          '💼',
+  relationship: '👥',
+  goal:         '🎯',
+  tool:         '🔧',
+  trait:        '✦',
+  other:        '·',
+};
+
+let profileOpen = false;
+
+async function loadProfile() {
+  const res  = await fetch('/profile');
+  const data = await res.json();
+  const body = document.getElementById('profile-body');
+
+  if (!Object.keys(data.profile).length) {
+    body.innerHTML = '<div class="profile-empty">No facts extracted yet. Keep chatting.</div>';
+    return;
+  }
+
+  body.innerHTML = Object.entries(data.profile).map(([category, facts]) => `
+    <div class="profile-category">
+      <div class="profile-category-label">
+        ${CATEGORY_ICONS[category] || '·'} ${category}
+      </div>
+      ${facts.map(f => `
+        <div class="profile-fact">
+          <span>${f.fact}</span>
+          <div class="conf-bar-wrap" title="${Math.round(f.confidence * 100)}% confidence">
+            <div class="conf-bar" style="width:${f.confidence * 100}%"></div>
+          </div>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+function toggleProfile() {
+  const panel = document.getElementById('profile-panel');
+  profileOpen = !profileOpen;
+  panel.style.display = profileOpen ? 'flex' : 'none';
+  if (profileOpen) loadProfile();
+}
+
+function updateStats(data) {
+  const ep = data.nodes.filter(n => n.type === 'Episodic').length;
+  const sm = data.nodes.filter(n => n.type === 'Semantic').length;
+  document.getElementById('cnt-e').textContent     = `${ep} episodic`;
+  document.getElementById('cnt-s').textContent     = `${sm} semantic`;
+  document.getElementById('cnt-edges').textContent = `${data.edges.length} edges`;
+}
+
+function renderGraph(data) {
+  if (!width) initGraph();
+
+  const nodeById = new Map(data.nodes.map(n => [n.id, n]));
+
+  const links = data.edges
+    .filter(e => nodeById.has(e.source) && nodeById.has(e.target))
+    .map(e => ({ source: e.source, target: e.target, relation: e.relation }));
+
+  const nodes = data.nodes.map(n => ({ ...n }));
+
+  // reuse positions from previous simulation
+  const prevMap = new Map(
+    (simulation ? simulation.nodes() : []).map(n => [n.id, { x: n.x, y: n.y }])
+  );
+  nodes.forEach(n => {
+    if (prevMap.has(n.id)) { n.x = prevMap.get(n.id).x; n.y = prevMap.get(n.id).y; }
+  });
+
+  if (simulation) simulation.stop();
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link',   d3.forceLink(links).id(d => d.id).distance(100).strength(.4))
+    .force('charge', d3.forceManyBody().strength(-250))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collide', d3.forceCollide(24));
+
+  // edges
+  const edgeG = svg.select('.edges-layer');
+  edgeG.selectAll('*').remove();
+
+  const link = edgeG.selectAll('line')
+    .data(links).join('line')
+    .attr('stroke', '#2a2d3e')
+    .attr('stroke-width', 1.5)
+    .attr('marker-end', 'url(#arrow)');
+
+  const linkLabel = edgeG.selectAll('text')
+    .data(links).join('text')
+    .attr('fill', '#4b5563')
+    .attr('font-size', 9)
+    .attr('text-anchor', 'middle')
+    .text(d => d.relation);
+
+  // nodes
+  const nodeG = svg.select('.nodes-layer');
+  nodeG.selectAll('*').remove();
+
+  const node = nodeG.selectAll('g')
+    .data(nodes).join('g')
+    .style('cursor', 'pointer')
+    .on('click', (_, d) => showDetail(d))
+    .call(d3.drag()
+      .on('start', (event, d) => { if (!event.active) simulation.alphaTarget(.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on('end',   (event, d) => { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    );
+
+  node.append('circle')
+    .attr('r', d => RADIUS[d.type] || 8)
+    .attr('fill', d => COLOR[d.type] || '#888')
+    .attr('fill-opacity', d => d.type === 'Semantic' ? 1 : .7)
+    .attr('stroke', '#0f1117')
+    .attr('stroke-width', 2);
+
+  node.append('text')
+    .attr('dy', d => (RADIUS[d.type] || 8) + 12)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#9ca3af')
+    .attr('font-size', 9)
+    .text(d => d.label.slice(0, 28));
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    linkLabel
+      .attr('x', d => (d.source.x + d.target.x) / 2)
+      .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+}
+
+// ── detail panel ───────────────────────────────────────────────────────────
+
+function showDetail(d) {
+  document.getElementById('detail-type').textContent    = d.type + ' Memory';
+  document.getElementById('detail-content').textContent = d.content;
+  const tagsEl = document.getElementById('detail-tags');
+  tagsEl.innerHTML = (d.tags || []).map(t => `<span class="tag">${t}</span>`).join('');
+  document.getElementById('detail-panel').style.display = 'block';
+}
+function closeDetail() { document.getElementById('detail-panel').style.display = 'none'; }
+
+// ── search ─────────────────────────────────────────────────────────────────
+
+const searchInput   = document.getElementById('search-input');
+const searchBtn     = document.getElementById('search-btn');
+const searchClear   = document.getElementById('search-clear');
+const searchResults = document.getElementById('search-results');
+
+function formatDate(iso) {
+  if (!iso) return 'unknown';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+async function runSearch() {
+  const q = searchInput.value.trim();
+  if (!q) return;
+
+  searchResults.innerHTML = '<div class="search-empty">Searching…</div>';
+  searchClear.style.display = 'inline-block';
+
+  try {
+    const res  = await fetch(`/search?q=${encodeURIComponent(q)}&limit=10`);
+    const data = await res.json();
+
+    if (!data.results || !data.results.length) {
+      searchResults.innerHTML = '<div class="search-empty">No memories found.</div>';
+      return;
+    }
+
+    searchResults.innerHTML = data.results.map(node => {
+      const conf = node.type === 'Semantic' && node.confidence != null
+        ? `<span class="result-conf">${(node.confidence * 100).toFixed(0)}% confidence</span>`
+        : '';
+
+      const neighborsHtml = node.neighbors && node.neighbors.length
+        ? `<div class="result-neighbors">
+             <div class="neighbors-label">Connected</div>
+             ${node.neighbors.slice(0, 3).map(n => `
+               <div class="neighbor-row">
+                 <span class="rel-badge">${n.relation}</span>
+                 <span>${(n.target_content || n.target || '').slice(0, 72)}…</span>
+               </div>`).join('')}
+           </div>`
+        : '';
+
+      return `
+        <div class="search-result ${node.type}">
+          <div class="result-meta">
+            <span class="result-type ${node.type}">${node.type}</span>
+            <span class="result-date">${formatDate(node.created_at)}</span>
+            ${conf}
+          </div>
+          <div class="result-content">${node.content}</div>
+          ${neighborsHtml}
+        </div>`;
+    }).join('');
+
+  } catch (err) {
+    searchResults.innerHTML = `<div class="search-empty">⚠ Search error: ${err.message}</div>`;
+  }
+}
+
+searchBtn.addEventListener('click', runSearch);
+searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+searchClear.addEventListener('click', () => {
+  searchInput.value = '';
+  searchResults.innerHTML = '';
+  searchClear.style.display = 'none';
+});
+
+// ── init ───────────────────────────────────────────────────────────────────
+
+window.addEventListener('resize', () => { width = 0; refreshGraph(); });
+initGraph();
+refreshGraph();
+setInterval(refreshGraph, 10000);   // poll every 10s
+</script>
+</body>
+</html>
