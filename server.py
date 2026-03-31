@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -18,10 +19,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
+from core import GraphStore, LLMClient, MemGraphEngine, MemGraphAgent
+from core.memory import NodeType
+
 load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from core import GraphStore, LLMClient, MemGraphEngine, MemGraphAgent
 
 # config
 
@@ -93,8 +96,7 @@ async def search_memory(q: str, limit: int = 10):
     if not q.strip():
         raise HTTPException(status_code=400, detail="Empty query")
 
-    import json
-    matches = engine.graph.search_by_content(q, limit=limit)
+    matches = engine.graph.search_by_vector(engine.llm.embed(q).tolist(), limit=limit)
 
     results = []
     for node in matches:
@@ -106,7 +108,7 @@ async def search_memory(q: str, limit: int = 10):
             "created_at": node.get("created_at", ""),
             "tags":       json.loads(node.get("tags", "[]")),
             "confidence": node.get("confidence") if node.get("type") == "Semantic" else None,
-            "neighbors":  neighbors,  # [{relation, target, target_content}]
+            "neighbors":  neighbors,
         })
 
     return SearchResponse(results=results)
@@ -118,7 +120,6 @@ async def reset_session():
 
 @app.get("/memories")
 async def get_memories(type: str | None = None):
-    from core.memory import NodeType
     nt = NodeType(type) if type else None
     return engine.graph.all_nodes(node_type=nt)
 
@@ -130,7 +131,6 @@ async def clear_graph():
 
 @app.get("/profile")
 async def get_profile():
-    import json
     all_nodes = engine.graph.all_nodes()
     facts = [
         {

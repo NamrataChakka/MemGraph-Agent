@@ -76,6 +76,7 @@ class MemoryNode:
     confidence: float                   = 1.0   # semantic nodes only
     created_at: str                     = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     derived_from: list[str]             = field(default_factory=list)  # episodic ids
+    embedding: list[float]              = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -86,6 +87,7 @@ class MemoryNode:
             "confidence":   self.confidence,
             "created_at":   self.created_at,
             "derived_from": json.dumps(self.derived_from),
+            "embedding":    self.embedding
         }
 
 
@@ -112,6 +114,8 @@ class GraphStore:
         with self._driver.session() as s:
             s.run("CREATE CONSTRAINT memory_id IF NOT EXISTS FOR (n:Memory) REQUIRE n.id IS UNIQUE")
             s.run("CREATE INDEX memory_type IF NOT EXISTS FOR (n:Memory) ON (n.type)")
+            s.run("CREATE VECTOR INDEX memory_embedding IF NOT EXISTS FOR (m:Memory) ON m.embedding "
+                  "OPTIONS {indexConfig: {`vector.dimensions`: 768,`vector.similarity_function`: 'cosine'}}")
 
     def upsert_node(self, node: MemoryNode):
         with self._driver.session() as s:
@@ -207,14 +211,21 @@ class GraphStore:
             )
             return [dict(r) for r in result]
 
-    def search_by_content(self, query: str, limit: int = 5) -> list[dict]:
+    # TODO: update the query to use MATCH when using neo4j6.0
+    def search_by_vector(self, embedding: list[float], limit: int = 5) -> list[dict]:
         with self._driver.session() as s:
             result = s.run(
-                "MATCH (n:Memory) WHERE toLower(n.content) CONTAINS toLower($q) RETURN n LIMIT $limit",
-                q=query,
-                limit=limit,
+            """
+            CALL db.index.vector.queryNodes('memory_embedding', $limit, $embedding)
+            YIELD node, score
+            WHERE node.embedding IS NOT NULL
+            RETURN node, score
+            ORDER BY score DESC
+            """,
+            embedding=embedding,
+            limit=limit,
             )
-            return [dict(r["n"]) for r in result]
+            return [{"score": r["score"], **dict(r["node"])} for r in result]
 
     def count_episodic_for_pattern(self, pattern: str) -> int:
         with self._driver.session() as s:
@@ -356,11 +367,13 @@ class MemGraphEngine:
         """Store a new episodic memory from a conversation turn."""
         content = f"User: {user_message}\nAssistant: {assistant_reply}"
         tags    = self._extract_tags(content)
+        embedding = self.llm.embed(content).tolist()
         node    = MemoryNode(
             id=str(uuid.uuid4()),
             type=NodeType.EPISODIC,
             content=content,
             tags=tags,
+            embedding=embedding
         )
         self.graph.upsert_node(node)
         self._link_to_related(node)
@@ -369,13 +382,13 @@ class MemGraphEngine:
         return node
 
     def recall(self, query: str, top_k: int = 5) -> list[dict]:
-        """Retrieve relevant memories for a query"""
-        semantic  = self.graph.search_by_content(query, limit=top_k)
-        episodic  = self.graph.search_by_content(query, limit=top_k)
+        """Retrieve relevant memories using vector indexes for a query"""
+        query_vec = self.llm.embed(query).tolist()
+        vector_results = self.graph.search_by_vector(query_vec, limit=top_k)
 
         # deduplicate by id
         seen, results = set(), []
-        for node in semantic + episodic:
+        for node in vector_results:
             if node["id"] not in seen:
                 seen.add(node["id"])
                 results.append(node)
@@ -477,7 +490,7 @@ class MemGraphEngine:
         if not new_node.tags:
             return
         query   = " ".join(new_node.tags)
-        related = self.graph.search_by_content(query, limit=5)
+        related = self.graph.search_by_vector(self.llm.embed(query).tolist(), limit=5)
         for r in related:
             if r["id"] == new_node.id:
                 continue
@@ -518,7 +531,7 @@ class MemGraphEngine:
             return
 
         # check if a semantic node with this summary already exists
-        existing = self.graph.search_by_content(summary, limit=3)
+        existing = self.graph.search_by_vector(self.llm.embed(summary).tolist(), limit=3)
         for ex in existing:
             if ex.get("type") == "Semantic" and tag in json.loads(ex.get("tags", "[]")):
                 # reinforce instead of duplicating
@@ -540,6 +553,7 @@ class MemGraphEngine:
             tags=[tag],
             confidence=confidence,
             derived_from=[e["id"] for e in episodes],
+            embedding=self.llm.embed(summary).tolist(),
         )
         self.graph.upsert_node(sem_node)
 
@@ -635,7 +649,7 @@ class MemGraphEngine:
                 if not fact:
                     continue
 
-                existing = self.graph.search_by_content(fact, limit=3)
+                existing = self.graph.search_by_vector(self.llm.embed(fact).tolist(), limit=3)
                 for ex in existing:
                     if ex.get("type") == "Semantic" and "user_fact" in json.loads(ex.get("tags", "[]")):
                         ex_node = MemoryNode(
@@ -655,6 +669,7 @@ class MemGraphEngine:
                     content=fact,
                     tags=[category, "user_fact"],
                     confidence=confidence,
+                    embedding=self.llm.embed(fact).tolist(),
                 )
                 self.graph.upsert_node(node)
 
