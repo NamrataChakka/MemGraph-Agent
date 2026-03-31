@@ -571,7 +571,7 @@
 </div>
 
 <script>
-// ── state
+// ── state ──────────────────────────────────────────────────────────────────
 
 let simulation = null;
 let graphData  = { nodes: [], edges: [] };
@@ -655,8 +655,8 @@ async function sendMessage() {
     hideTyping();
     addMsg(data.reply, 'agent');
     setTimeout(() => {
-      refreshGraph().then(() => highlightByQuery(text));
-    }, 600);
+  refreshGraph().then(() => highlightByQuery(text));
+}, 600);
   } catch (err) {
     hideTyping();
     addMsg('⚠ Error reaching server: ' + err.message, 'system');
@@ -681,7 +681,7 @@ async function clearGraph() {
   addMsg('Graph cleared. All memories deleted.', 'system');
 }
 
-// ── graph
+// ── graph ──────────────────────────────────────────────────────────────────
 
 const svg      = d3.select('#graph-svg');
 const COLOR    = { Episodic: '#7c6af7', Semantic: '#4ecdc4' };
@@ -721,9 +721,14 @@ async function refreshGraph() {
   try {
     const res  = await fetch('/graph');
     const data = await res.json();
-    graphData  = data;
     updateStats(data);
-    renderGraph(data);
+    // only re-render if something actually changed
+    const same = data.nodes.length === graphData.nodes.length &&
+                 data.edges.length === graphData.edges.length;
+    if (!same) {
+      graphData = data;
+      renderGraph(data);
+    }
   } catch (e) {
     console.warn('Graph refresh failed:', e);
   }
@@ -808,7 +813,12 @@ function renderGraph(data) {
     .force('link',   d3.forceLink(links).id(d => d.id).distance(100).strength(.4))
     .force('charge', d3.forceManyBody().strength(-250))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collide', d3.forceCollide(24));
+    .force('collide', d3.forceCollide(24))
+    .alphaDecay(0.05)   // cools faster (default 0.0228)
+    .alphaMin(0.001)    // stops sooner
+    .on('end', () => {  // pin all nodes once settled
+      simulation.nodes().forEach(n => { n.fx = n.x; n.fy = n.y; });
+    });
 
   // edges
   const edgeG = svg.select('.edges-layer');
