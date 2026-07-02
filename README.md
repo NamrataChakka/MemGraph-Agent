@@ -2,6 +2,10 @@
 
 A local AI assistant for Apple Silicon Macs that runs entirely on-device using MLX, with graph-based long-term memory powered by Neo4j + Qdrant hybrid search and built-in household tools.
 
+![Chat Interface](MemGraphUI_chat.png)
+
+![Books Tab](MemGraphUI.png)
+
 ## Features
 
 - **Local LLM inference via MLX** -- Qwen3.5-9B for chat, Qwen3-1.7B for background tasks (tag/fact extraction). No API keys, no cloud dependency.
